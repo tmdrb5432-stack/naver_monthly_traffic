@@ -141,9 +141,7 @@
   </div>
   <button id="processBtn">처리 시작</button>
   <div style="margin-top:10px;">
-    <button id="downloadBtn1" disabled>① 전체(IDC+비즈넷) 다운로드</button>
-    <button id="downloadBtn2" disabled>② IDC만 다운로드</button>
-    <button id="downloadBtn3" disabled>③ 비즈넷만 다운로드</button>
+    <button id="downloadBtn" disabled>결과 다운로드 (.xlsx)</button>
   </div>
   <div id="log"></div>
 </div>
@@ -417,9 +415,57 @@ function buildIntl(intl, discountPercent) {
   return { headers, categories, rows, numCircuits, maxColIdx, highlightIdx, totalTimeSlots: timeline.length };
 }
 
-// ---------- ExcelJS 워크북 생성 (범용: sheetDefs = [{name, data}, ...]) ----------
-async function buildWorkbookFromSheets(sheetDefs) {
+// ---------- 종합 sheet 작성 (처리시작 버튼 색상 = 네이버 그린 #03C75A 적용) ----------
+function writeSummarySheet(wb, entries, targetYear, targetMonth, discountPercent) {
+  const ws = wb.addWorksheet('종합');
+  const headers = ['구분','사용월','Peak 할인율','총 시간대 수','과금대상 No','과금대상 시각','사용량(Gbps)','바로가기'];
+  ws.addRow(headers);
+
+  const headerRow = ws.getRow(1);
+  headerRow.height = 33;
+  headerRow.font = { bold: true, color:{argb:'FFFFFFFF'} };
+  headerRow.eachCell(c => {
+    c.fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FF03C75A'} }; // 네이버 그린 (처리시작 버튼 색상)
+    c.alignment = { wrapText: true, vertical: 'middle', horizontal: 'center' };
+  });
+
+  entries.forEach(({ name, data }) => {
+    const cutoffRow = data.rows[data.highlightIdx];
+    const cutoffVal = Number(cutoffRow[data.maxColIdx]) || 0;
+    const rankNo = data.highlightIdx + 1;
+    const targetRowNum = data.highlightIdx + 2;
+    const row = ws.addRow([
+      name,
+      `${targetYear}년 ${targetMonth}월`,
+      `${discountPercent}%`,
+      data.rows.length,
+      rankNo,
+      cutoffRow[0],
+      Number((cutoffVal / 1e9).toFixed(3)),
+      { text: `${name} 시트로 이동`, hyperlink: `#'${name}'!A${targetRowNum}` }
+    ]);
+    row.getCell(6).numFmt = 'yyyy-mm-dd hh:mm';
+    row.getCell(7).numFmt = '#,##0.000';
+    row.getCell(8).font = { bold:true, underline:true, color:{argb:'FF0563C1'} };
+  });
+
+  ws.columns.forEach(col => { col.width = 21.25; });
+  const thinBorder = { style:'thin', color:{argb:'FF000000'} };
+  const thinBox = { top:thinBorder, left:thinBorder, bottom:thinBorder, right:thinBorder };
+  ws.eachRow({ includeEmpty:true }, row => {
+    row.eachCell({ includeEmpty:true }, c => { c.border = thinBox; });
+  });
+
+  return ws;
+}
+
+// ---------- ExcelJS 워크북 생성 (범용: sheetDefs = [{name, data}, ...], summaryInfo는 선택) ----------
+async function buildWorkbookFromSheets(sheetDefs, summaryInfo) {
   const wb = new ExcelJS.Workbook();
+
+  if (summaryInfo) {
+    writeSummarySheet(wb, summaryInfo.entries, summaryInfo.targetYear, summaryInfo.targetMonth, summaryInfo.discountPercent);
+  }
 
   const CATEGORY_COLORS = {
     time:        'FF00B0B9', // 청록색 - A열(시간)
@@ -549,44 +595,6 @@ function buildIdcOnly(idcPorts, discountPercent) {
   return { headers, categories, rows, numPorts, maxColIdx, highlightIdx, totalTimeSlots: timeline.length };
 }
 
-// ---------- 국내 비즈넷만의 데이터 구성 (Max/순위/백분위 독립 재계산) ----------
-function buildBiznetDomesticOnly(dom, discountPercent) {
-  const numDom = dom.outputHeaders.length;
-  const timeline = Array.from(dom.dataMap.entries())
-    .map(([key,v]) => ({key, serial:v.serial}))
-    .sort((a,b) => a.serial - b.serial);
-
-  const headers = ['시간'];
-  const categories = ['time'];
-  dom.outputHeaders.forEach(h => { headers.push(`${h}_출력`); categories.push('output'); });
-  headers.push('출력(bps) 총계'); categories.push('outputTotal');
-  dom.inputHeaders.forEach(h => { headers.push(`${h}_입력`); categories.push('input'); });
-  headers.push('입력(bps) 총계'); categories.push('inputTotal');
-  headers.push('Max(출력)'); categories.push('stat');
-  headers.push('순위'); categories.push('stat');
-  headers.push('백분위'); categories.push('stat');
-
-  const maxColIdx = 1 + numDom + 1 + numDom + 1;
-
-  const rows = [];
-  timeline.forEach(t => {
-    const row = new Array(headers.length).fill(null);
-    row[0] = t.serial;
-    const dv = dom.dataMap.get(t.key);
-    let outSum = 0, inSum = 0;
-    let idx = 1;
-    for (let j=0;j<numDom;j++) { const val = dv ? (Number(dv.outArr[j])||0) : 0; row[idx++]=val; outSum+=val; }
-    row[idx++] = outSum;
-    for (let j=0;j<numDom;j++) { const val = dv ? (Number(dv.inArr[j])||0) : 0; row[idx++]=val; inSum+=val; }
-    row[idx++] = inSum;
-    row[idx++] = Math.max(outSum, inSum);
-    rows.push(row);
-  });
-
-  const highlightIdx = rankAndPercentile(rows, maxColIdx, discountPercent);
-  return { headers, categories, rows, numDom, maxColIdx, highlightIdx, totalTimeSlots: timeline.length };
-}
-
 // ---------- 과금 기준 커브 SVG ----------
 function buildCurveSVG(rows, maxColIdx, highlightIdx) {
   const W = 460, H = 190, padL = 30, padR = 14, padT = 18, padB = 26;
@@ -697,11 +705,11 @@ function runVerification(domData, intlData, idcPorts, dom, intl, targetYear, tar
 }
 
 // ---------- 메인 처리 ----------
-let finalWorkbooks = { combined:null, idc:null, biznet:null };
+let finalWorkbook = null;
 
 document.getElementById('processBtn').addEventListener('click', async () => {
   logEl.textContent = '';
-  ['downloadBtn1','downloadBtn2','downloadBtn3'].forEach(id => document.getElementById(id).disabled = true);
+  document.getElementById('downloadBtn').disabled = true;
   document.getElementById('resultCard').style.display = 'none';
   document.getElementById('verifyCard').style.display = 'none';
   try {
@@ -743,35 +751,29 @@ document.getElementById('processBtn').addEventListener('click', async () => {
     log('② IDC만의 데이터 계산 중... (Max/순위/백분위 독립 재계산)');
     const idcOnlyData = buildIdcOnly(idcPorts, discountPercent);
 
-    log('③ 비즈넷만의 데이터 계산 중... (국내비즈넷 Max/순위/백분위 독립 재계산, 국제는 원래 비즈넷 전용)');
-    const biznetDomOnlyData = buildBiznetDomesticOnly(dom, discountPercent);
-
     log('검증 진행 중...');
     const allPass = runVerification(domData, intlData, idcPorts, dom, intl, targetYear, targetMonth);
     log(allPass ? '모든 검증 통과 ✅' : '일부 검증 실패 — 검증 표를 확인하세요 ❌');
 
     document.getElementById('resultGrid').innerHTML =
-      renderResultBox('① 통합인터넷(국내)', domData, discountPercent) +
-      renderResultBox('① 통합인터넷(국제)', intlData, discountPercent) +
-      renderResultBox('② IDC트래픽만(국내)', idcOnlyData, discountPercent) +
-      renderResultBox('③ 비즈넷만(국내)', biznetDomOnlyData, discountPercent);
+      renderResultBox('통합인터넷(국내)', domData, discountPercent) +
+      renderResultBox('통합인터넷(국제)', intlData, discountPercent) +
+      renderResultBox('통합인터넷_IDC_Only', idcOnlyData, discountPercent);
     document.getElementById('resultCard').style.display = 'block';
 
-    log('Excel 워크북 3종 생성 중...');
-    finalWorkbooks.combined = await buildWorkbookFromSheets([
+    log('Excel 워크북 생성 중... (종합/통합인터넷(국내)/통합인터넷(국제)/통합인터넷_IDC_Only)');
+    const sheetDefs = [
       { name:'통합인터넷(국내)', data: domData },
-      { name:'통합인터넷(국제)', data: intlData }
-    ]);
-    finalWorkbooks.idc = await buildWorkbookFromSheets([
-      { name:'IDC트래픽(국내)', data: idcOnlyData }
-    ]);
-    finalWorkbooks.biznet = await buildWorkbookFromSheets([
-      { name:'비즈넷(국내)', data: biznetDomOnlyData },
-      { name:'비즈넷(국제)', data: intlData }
-    ]);
+      { name:'통합인터넷(국제)', data: intlData },
+      { name:'통합인터넷_IDC_Only', data: idcOnlyData }
+    ];
+    finalWorkbook = await buildWorkbookFromSheets(sheetDefs, {
+      entries: sheetDefs,
+      targetYear, targetMonth, discountPercent
+    });
 
-    log('완료! 원하는 다운로드 버튼을 눌러주세요.');
-    ['downloadBtn1','downloadBtn2','downloadBtn3'].forEach(id => document.getElementById(id).disabled = false);
+    log('완료! 다운로드 버튼을 눌러주세요.');
+    document.getElementById('downloadBtn').disabled = false;
   } catch (err) {
     log('오류 발생: ' + err.message);
     console.error(err);
@@ -779,23 +781,19 @@ document.getElementById('processBtn').addEventListener('click', async () => {
   }
 });
 
-async function downloadWorkbook(wb, filenamePrefix) {
-  if (!wb) return;
-  const buf = await wb.xlsx.writeBuffer();
+document.getElementById('downloadBtn').addEventListener('click', async () => {
+  if (!finalWorkbook) return;
+  const buf = await finalWorkbook.xlsx.writeBuffer();
   const blob = new Blob([buf], { type: 'application/octet-stream' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   const y = document.getElementById('usageYear').value;
   const m = String(monthSel.value).padStart(2,'0');
   a.href = url;
-  a.download = `${filenamePrefix}_${y}${m}.xlsx`;
+  a.download = `네이버_인터넷_통합_${y}${m}.xlsx`;
   a.click();
   URL.revokeObjectURL(url);
-}
-
-document.getElementById('downloadBtn1').addEventListener('click', () => downloadWorkbook(finalWorkbooks.combined, '네이버_인터넷_통합'));
-document.getElementById('downloadBtn2').addEventListener('click', () => downloadWorkbook(finalWorkbooks.idc, '네이버_IDC트래픽'));
-document.getElementById('downloadBtn3').addEventListener('click', () => downloadWorkbook(finalWorkbooks.biznet, '네이버_비즈넷'));
+});
 </script>
 </body>
 </html>
