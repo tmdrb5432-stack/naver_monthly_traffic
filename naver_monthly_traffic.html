@@ -1,0 +1,801 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>네이버 인터넷 과금 통합 도구</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.3.0/exceljs.min.js"></script>
+<style>
+  :root {
+    --naver-green: #03C75A;
+    --ink: #1a1a1a;
+    --sub: #6b7280;
+    --line: #e5e7eb;
+    --card-bg: #ffffff;
+    --page-bg: #f4f6f8;
+  }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "Malgun Gothic", "Apple SD Gothic Neo", sans-serif;
+    background: var(--page-bg);
+    color: var(--ink);
+    margin: 0;
+    padding: 36px 20px 60px;
+  }
+  .wrap { max-width: 1040px; margin: 0 auto; }
+  h1 { font-size: 23px; margin: 0 0 22px; font-weight: 700; }
+  .card {
+    background: var(--card-bg);
+    border: 1px solid var(--line);
+    border-radius: 14px;
+    padding: 24px 28px;
+    margin-bottom: 20px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+  }
+  .card-title { font-size: 16px; font-weight: 700; margin: 0 0 4px; display:flex; align-items:center; gap:8px; }
+  .card-title .num { background: var(--naver-green); color:white; width:22px; height:22px; border-radius:50%; display:inline-flex; align-items:center; justify-content:center; font-size:13px; }
+  .card-desc { font-size: 13px; color: var(--sub); margin: 0 0 20px; }
+
+  .settings-grid { display:grid; grid-template-columns: 1fr 1fr; gap: 28px; }
+  .field { margin-bottom: 16px; }
+  .field label { display:block; font-size:13.5px; font-weight:600; margin-bottom:6px; color:#333; }
+  .field .hint { font-size:12px; color:var(--sub); margin-top:4px; }
+  select, input[type=number], input[type=text] {
+    border:1px solid var(--line); border-radius:8px; padding:9px 10px; font-size:14px; background:#fafafa;
+  }
+  .month-row { display:flex; align-items:center; gap:8px; }
+  .month-row input[type=number] { width:90px; }
+  .month-row select { width:100px; }
+  select#calcMethod { width:100%; }
+
+  .slider-row { display:flex; align-items:center; gap:14px; }
+  input[type=range] { flex:1; accent-color: var(--naver-green); height:6px; }
+  .slider-val { min-width:60px; text-align:center; background:#eafaf1; color:#03994a; font-weight:700; border-radius:8px; padding:8px 4px; font-size:15px; }
+
+  .result-grid { display:grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .result-box { border:1px solid var(--line); border-radius:10px; padding:16px 18px; background:#fafcfb; }
+  .result-box h3 { margin:0 0 10px; font-size:14px; }
+  .result-nums { display:flex; gap:14px; margin-bottom:10px; }
+  .result-nums .item { flex:1; background:white; border:1px solid var(--line); border-radius:8px; padding:10px 12px; text-align:center; }
+  .result-nums .item .lbl { font-size:11.5px; color:var(--sub); }
+  .result-nums .item .val { font-size:18px; font-weight:700; color:#e05a2b; }
+  .curve-caption { font-size:12px; color:#444; margin-top:8px; line-height:1.5; }
+
+  .upload-box { border: 1px solid var(--line); border-radius: 10px; padding: 14px 18px; margin-bottom: 12px; background: #fafafa; }
+  .upload-box label { display:block; font-weight:600; margin-bottom:6px; font-size:13.5px; }
+  input[type=file] { width: 100%; }
+
+  button { padding: 11px 22px; font-size: 14.5px; border-radius: 8px; border: none; cursor: pointer; margin-right: 10px; font-weight:600; }
+  #processBtn { background:var(--naver-green); color:white; }
+  #downloadBtn { background:#222; color:white; }
+  button:disabled { background:#ccc; cursor:not-allowed; }
+
+  #log { white-space: pre-wrap; background:#111; color:#7CFC98; font-family:monospace; font-size:12.5px; padding:14px; border-radius:8px; max-height:240px; overflow-y:auto; margin-top:14px; }
+
+  table.verify { border-collapse: collapse; width:100%; margin-top:6px; font-size:13.5px; }
+  table.verify td, table.verify th { border:1px solid var(--line); padding:7px 10px; text-align:left; }
+  table.verify th { background:#f0f2f4; }
+  .ok { color: #0a7a0a; font-weight:600; }
+  .fail { color: #c0392b; font-weight:600; }
+
+  .assump { background:#fff8e1; border-left:4px solid #f0ad4e; padding:10px 14px; font-size:13px; margin-bottom:6px; border-radius:0 8px 8px 0; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>네이버 월별 인터넷 과금 데이터 통합</h1>
+
+<!-- ① 사용월 및 과금 기준 -->
+<div class="card">
+  <p class="card-title"><span class="num">1</span>사용월 및 과금 기준</p>
+  <p class="card-desc">Peak 할인율과 계산 방식을 정하면, 업로드된 실제 데이터 기준으로 그 달의 과금대상 트래픽 No.가 자동 계산됩니다.</p>
+
+  <div class="settings-grid">
+    <div>
+      <div class="field">
+        <label>사용월</label>
+        <div class="month-row">
+          <input type="number" id="usageYear" value="2026" min="2000" max="2100"> 년
+          <select id="usageMonth"></select> 월
+          <span class="hint" id="daysHint" style="margin-left:6px;"></span>
+        </div>
+        <div class="hint">파일명 표시용이며, 과금 기준 No.는 실제 업로드 데이터의 시점 수를 기준으로 계산됩니다.</div>
+      </div>
+      <div class="field">
+        <label>계산방식</label>
+        <select id="calcMethod">
+          <option value="5min-max">5분 단위 (IN/OUT 중 큰 값)</option>
+        </select>
+      </div>
+    </div>
+    <div>
+      <div class="field">
+        <label>Peak 할인율</label>
+        <div class="slider-row">
+          <input type="range" id="discountSlider" min="0" max="20" step="0.5" value="5">
+          <div class="slider-val"><span id="discountVal">5</span> %</div>
+        </div>
+        <div class="hint">전체 시점을 트래픽 합계 내림차순으로 나열했을 때, 상위 N% 지점을 제외한 첫 시점이 과금 기준 트래픽이 됩니다.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ② 파일 업로드 -->
+<div class="card">
+  <p class="card-title"><span class="num">2</span>파일 업로드</p>
+  <div class="assump">
+    <b>적용된 가정</b> (실제 파일과 다르면 알려주세요): IDC트래픽은 각 시트 데이터 시작행의 A열=포트ID, B=시간, C=In, D=Out · 국내_비즈넷은 입력 B~O(14열)/출력 Q~AD(14열) · 국제_비즈넷은 입력 B~G(6열)/출력 I~N(6열) · 회선 개수는 파일에서 자동 감지됩니다.
+  </div>
+  <div class="upload-box">
+    <label>① IDC트래픽 파일 (여러 파일 선택 가능 — 예: 48개 파일, 각 파일당 1개 sheet 또는 여러 sheet 모두 지원)</label>
+    <input type="file" id="idcFiles" accept=".xlsx,.xls,.csv" multiple>
+  </div>
+  <div class="upload-box">
+    <label>② 국내_비즈넷 파일</label>
+    <input type="file" id="domFile" accept=".xlsx,.xls,.csv">
+  </div>
+  <div class="upload-box">
+    <label>③ 국제_비즈넷 파일</label>
+    <input type="file" id="intlFile" accept=".xlsx,.xls,.csv">
+  </div>
+  <button id="processBtn">처리 시작</button>
+  <div style="margin-top:10px;">
+    <button id="downloadBtn1" disabled>① 전체(IDC+비즈넷) 다운로드</button>
+    <button id="downloadBtn2" disabled>② IDC만 다운로드</button>
+    <button id="downloadBtn3" disabled>③ 비즈넷만 다운로드</button>
+  </div>
+  <div id="log"></div>
+</div>
+
+<!-- ③ 과금대상 트래픽 결과 (처리 후 표시) -->
+<div class="card" id="resultCard" style="display:none;">
+  <p class="card-title"><span class="num">3</span>과금대상 트래픽 결과</p>
+  <div class="result-grid" id="resultGrid"></div>
+</div>
+
+<!-- ④ 검증 결과 -->
+<div class="card" id="verifyCard" style="display:none;">
+  <p class="card-title"><span class="num">4</span>검증 결과</p>
+  <table class="verify" id="verifyTable"><tbody></tbody></table>
+</div>
+
+</div>
+
+<script>
+const logEl = document.getElementById('log');
+function log(msg) { logEl.textContent += msg + "\n"; logEl.scrollTop = logEl.scrollHeight; }
+
+// ---------- 상단 설정 UI 초기화 ----------
+const monthSel = document.getElementById('usageMonth');
+for (let m=1;m<=12;m++) { const o=document.createElement('option'); o.value=m; o.textContent=m; monthSel.appendChild(o); }
+const now = new Date();
+document.getElementById('usageYear').value = now.getFullYear();
+monthSel.value = now.getMonth()+1;
+
+function updateDaysHint() {
+  const y = +document.getElementById('usageYear').value;
+  const m = +monthSel.value;
+  const days = new Date(y, m, 0).getDate();
+  document.getElementById('daysHint').textContent = `(${y}년 ${m}월 = ${days}일)`;
+}
+document.getElementById('usageYear').addEventListener('input', updateDaysHint);
+monthSel.addEventListener('change', updateDaysHint);
+updateDaysHint();
+
+const discountSlider = document.getElementById('discountSlider');
+const discountVal = document.getElementById('discountVal');
+discountSlider.addEventListener('input', () => { discountVal.textContent = discountSlider.value; });
+
+// ---------- 시간(시리얼) 처리: 타임존 안전 UTC 앵커 방식 ----------
+const EXCEL_EPOCH_UTC = Date.UTC(1899, 11, 30);
+function decodeSerial(serial) {
+  let ms = EXCEL_EPOCH_UTC + serial * 86400000;
+  ms = Math.round(ms / 1000) * 1000;
+  const d = new Date(ms);
+  return { y:d.getUTCFullYear(), m:d.getUTCMonth()+1, d:d.getUTCDate(), hh:d.getUTCHours(), mm:d.getUTCMinutes() };
+}
+function serialFromParts(y,m,d,hh,mm,ss=0) {
+  return (Date.UTC(y, m-1, d, hh, mm, ss) - EXCEL_EPOCH_UTC) / 86400000;
+}
+function canonicalKey(y,m,d,hh,mm) { return `${y}-${m}-${d}-${hh}-${mm}`; }
+function parseTimeValue(raw) {
+  if (raw == null) return null;
+  if (typeof raw === 'number') {
+    const p = decodeSerial(raw);
+    return { serial: raw, key: canonicalKey(p.y,p.m,p.d,p.hh,p.mm), y:p.y, m:p.m };
+  }
+  if (typeof raw === 'string') {
+    const m = raw.trim().match(/^(\d{4})[-\/.](\d{1,2})[-\/.](\d{1,2})[ T](\d{1,2}):(\d{1,2})/);
+    if (!m) return null;
+    const y=+m[1], mo=+m[2], d=+m[3], hh=+m[4], mi=+m[5];
+    return { serial: serialFromParts(y,mo,d,hh,mi,0), key: canonicalKey(y,mo,d,hh,mi), y, m:mo };
+  }
+  return null;
+}
+
+function readFileAsWorkbook(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = new Uint8Array(e.target.result);
+        const wb = XLSX.read(data, { type: 'array' }); // cellDates 미지정 -> raw serial 유지
+        resolve(wb);
+      } catch (err) { reject(err); }
+    };
+    reader.onerror = reject;
+    reader.readAsArrayBuffer(file);
+  });
+}
+
+function colLetterToIndex(letter) { // 0-indexed
+  let r = 0;
+  for (let i=0;i<letter.length;i++) r = r*26 + (letter.charCodeAt(i)-64);
+  return r-1;
+}
+
+// ---------- IDC트래픽 파싱 ----------
+function parseIDC(wb, fileLabel, targetYear, targetMonth) {
+  const ports = [];
+  let totalFiltered = 0;
+  wb.SheetNames.forEach(sheetName => {
+    const ws = wb.Sheets[sheetName];
+    const rows = XLSX.utils.sheet_to_json(ws, { header:1, raw:true, defval:null });
+    let dataStart = -1;
+    for (let r=0; r<rows.length; r++) {
+      if (rows[r] && parseTimeValue(rows[r][1])) { dataStart = r; break; }
+    }
+    if (dataStart === -1) { log(`⚠ [${fileLabel}] 시트 "${sheetName}": 유효한 시간 데이터를 찾지 못함, 스킵`); return; }
+    let portId = rows[dataStart] ? rows[dataStart][0] : null;
+    // 포트ID가 비어있거나 시트명이 일반적인 이름(Sheet1 등)일 경우 파일명을 함께 사용해 구분
+    if (portId == null || portId === '') portId = `${fileLabel}_${sheetName}`;
+    const dataMap = new Map();
+    for (let r=dataStart; r<rows.length; r++) {
+      const row = rows[r];
+      if (!row) continue;
+      const t = parseTimeValue(row[1]);
+      if (!t) continue;
+      if (t.y !== targetYear || t.m !== targetMonth) { totalFiltered++; continue; } // 사용월 외 데이터 제외
+      dataMap.set(t.key, { in: row[2], out: row[3], serial: t.serial });
+    }
+    ports.push({ portId: String(portId), dataMap, sheetName, fileLabel });
+  });
+  log(`[${fileLabel}] ${ports.length}개 포트(시트) 감지 → ${ports.map(p=>p.portId).join(', ')}${totalFiltered>0 ? ` (사용월 외 ${totalFiltered}행 제외)` : ''}`);
+  return ports;
+}
+
+// ---------- 비즈넷(국내/국제) 파싱 ----------
+function parseBiznet(wb, inLetterStart, inLetterEnd, outLetterStart, outLetterEnd, label, targetYear, targetMonth) {
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const rows = XLSX.utils.sheet_to_json(ws, { header:1, raw:true, defval:null });
+  const headerRow = rows[0] || [];
+  let dataStart = -1;
+  for (let r=1; r<rows.length; r++) {
+    if (rows[r] && parseTimeValue(rows[r][0])) { dataStart = r; break; }
+  }
+  if (dataStart === -1) throw new Error(`${label}: 유효한 시간 데이터를 찾지 못함`);
+
+  const inS = colLetterToIndex(inLetterStart), inE = colLetterToIndex(inLetterEnd);
+  const outS = colLetterToIndex(outLetterStart), outE = colLetterToIndex(outLetterEnd);
+  const inputHeaders = [], outputHeaders = [];
+  for (let c=inS; c<=inE; c++) inputHeaders.push(headerRow[c] != null ? String(headerRow[c]) : `회선${c+1}`);
+  for (let c=outS; c<=outE; c++) outputHeaders.push(headerRow[c] != null ? String(headerRow[c]) : `회선${c+1}`);
+
+  const dataMap = new Map();
+  let totalFiltered = 0;
+  for (let r=dataStart; r<rows.length; r++) {
+    const row = rows[r];
+    if (!row) continue;
+    const t = parseTimeValue(row[0]);
+    if (!t) continue;
+    if (t.y !== targetYear || t.m !== targetMonth) { totalFiltered++; continue; } // 사용월 외 데이터 제외
+    const inArr = [], outArr = [];
+    for (let c=inS; c<=inE; c++) inArr.push(row[c]);
+    for (let c=outS; c<=outE; c++) outArr.push(row[c]);
+    dataMap.set(t.key, { inArr, outArr, serial: t.serial });
+  }
+  log(`${label}: 입력 ${inputHeaders.length}개 회선, 출력 ${outputHeaders.length}개 회선, 데이터행 시작=${dataStart+1}행, 총 ${dataMap.size}개 시간대${totalFiltered>0 ? ` (사용월 외 ${totalFiltered}행 제외)` : ''}`);
+  return { inputHeaders, outputHeaders, dataMap };
+}
+
+// ---------- 정렬/순위/백분위 계산 ----------
+// discountPercent: Peak 할인율(%) - 상위 discountPercent% 지점을 제외한 첫 시점이 과금 기준
+function rankAndPercentile(rows, maxColIdx, discountPercent) {
+  rows.sort((a,b) => (Number(b[maxColIdx])||0) - (Number(a[maxColIdx])||0)); // Max(출력) 내림차순 정렬 (행 순서는 유지)
+  const N = rows.length;
+  rows.forEach((row, i) => {
+    const sortRank = i+1; // 1=Max 최고 (정렬/백분위 계산용 내부값)
+    row[maxColIdx+1] = N - sortRank + 1; // 순위 표시값: Max 최저=1, Max 최고=N
+    row[maxColIdx+2] = (N - sortRank + 1) / N; // 백분위 (기존과 동일, 상위일수록 100%에 가까움)
+  });
+  const targetRank = Math.min(N, Math.max(1, Math.round(N*(discountPercent/100))+1));
+  return targetRank - 1; // 0-indexed highlight row (백분위 (100-discountPercent)% 지점)
+}
+
+// ---------- 통합인터넷(국내) 시트 데이터 구성 ----------
+function buildDomestic(idcPorts, dom, discountPercent) {
+  const numPorts = idcPorts.length;
+  const numDom = dom.outputHeaders.length;
+  const timeline = Array.from(idcPorts[0].dataMap.entries())
+    .map(([key,v]) => ({key, serial:v.serial}))
+    .sort((a,b) => a.serial - b.serial);
+
+  const headers = [];
+  const categories = []; // 열별 색상 카테고리: neutral/output/outputTotal/input/inputTotal/stat
+  headers.push('시간'); categories.push('time');
+  idcPorts.forEach(p => { headers.push(`${p.portId}_출력`); categories.push('output'); });
+  dom.outputHeaders.forEach(h => { headers.push(`${h}_출력`); categories.push('output'); });
+  headers.push('출력(bps) 총계'); categories.push('outputTotal');
+  idcPorts.forEach(p => { headers.push(`${p.portId}_입력`); categories.push('input'); });
+  dom.inputHeaders.forEach(h => { headers.push(`${h}_입력`); categories.push('input'); });
+  headers.push('입력(bps) 총계'); categories.push('inputTotal');
+  headers.push('Max(출력)'); categories.push('stat');
+  headers.push('순위'); categories.push('stat');
+  headers.push('백분위'); categories.push('stat');
+
+  const maxColIdx = 1 + numPorts + numDom + 1 + numPorts + numDom + 1; // 시간+IDC출력+국내출력+출력총계+IDC입력+국내입력+입력총계 다음이 Max(출력)
+
+  const rows = [];
+  let missingCount = 0;
+  timeline.forEach(t => {
+    const row = new Array(headers.length).fill(null);
+    row[0] = t.serial;
+    let outSum = 0, inSum = 0;
+    let idx = 1;
+    idcPorts.forEach(p => {
+      const v = p.dataMap.get(t.key);
+      const val = v ? Number(v.out)||0 : 0;
+      if (!v) missingCount++;
+      row[idx++] = val; outSum += val;
+    });
+    const dv = dom.dataMap.get(t.key);
+    for (let j=0;j<numDom;j++) {
+      const val = dv ? (Number(dv.outArr[j])||0) : 0;
+      row[idx++] = val; outSum += val;
+    }
+    row[idx++] = outSum;
+    idcPorts.forEach(p => {
+      const v = p.dataMap.get(t.key);
+      const val = v ? Number(v.in)||0 : 0;
+      row[idx++] = val; inSum += val;
+    });
+    for (let j=0;j<numDom;j++) {
+      const val = dv ? (Number(dv.inArr[j])||0) : 0;
+      row[idx++] = val; inSum += val;
+    }
+    row[idx++] = inSum;
+    row[idx++] = Math.max(outSum, inSum);
+    rows.push(row);
+  });
+
+  const highlightIdx = rankAndPercentile(rows, maxColIdx, discountPercent);
+  return { headers, categories, rows, numPorts, numDom, maxColIdx, highlightIdx, missingCount, totalTimeSlots: timeline.length };
+}
+
+// ---------- 통합인터넷(국제) 시트 데이터 구성 ----------
+function buildIntl(intl, discountPercent) {
+  const numCircuits = intl.outputHeaders.length;
+  const timeline = Array.from(intl.dataMap.entries())
+    .map(([key,v]) => ({key, serial:v.serial}))
+    .sort((a,b) => a.serial - b.serial);
+
+  const headers = ['시간'];
+  const categories = ['time'];
+  intl.outputHeaders.forEach(h => { headers.push(`${h}_출력bps`); categories.push('output'); });
+  headers.push('출력(bps) 총계'); categories.push('outputTotal');
+  intl.inputHeaders.forEach(h => { headers.push(`${h}_입력_bps`); categories.push('input'); });
+  headers.push('입력(bps) 총계'); categories.push('inputTotal');
+  headers.push('Max(출력)'); categories.push('stat');
+  headers.push('순위'); categories.push('stat');
+  headers.push('백분위'); categories.push('stat');
+
+  const maxColIdx = 1 + numCircuits + 1 + numCircuits + 1;
+
+  const rows = [];
+  timeline.forEach(t => {
+    const row = new Array(headers.length).fill(null);
+    row[0] = t.serial;
+    const v = intl.dataMap.get(t.key);
+    let outSum = 0, inSum = 0;
+    let idx = 1;
+    for (let j=0;j<numCircuits;j++) {
+      const val = v ? (Number(v.outArr[j])||0) : 0;
+      row[idx++] = val; outSum += val;
+    }
+    row[idx++] = outSum;
+    for (let j=0;j<numCircuits;j++) {
+      const val = v ? (Number(v.inArr[j])||0) : 0;
+      row[idx++] = val; inSum += val;
+    }
+    row[idx++] = inSum;
+    row[idx++] = Math.max(outSum, inSum);
+    rows.push(row);
+  });
+
+  const highlightIdx = rankAndPercentile(rows, maxColIdx, discountPercent);
+  return { headers, categories, rows, numCircuits, maxColIdx, highlightIdx, totalTimeSlots: timeline.length };
+}
+
+// ---------- ExcelJS 워크북 생성 (범용: sheetDefs = [{name, data}, ...]) ----------
+async function buildWorkbookFromSheets(sheetDefs) {
+  const wb = new ExcelJS.Workbook();
+
+  const CATEGORY_COLORS = {
+    time:        'FF00B0B9', // 청록색 - A열(시간)
+    output:      'FF00B0B9', // 청록색 - 출력값
+    outputTotal: 'FFFFFF00', // 노란색 - 출력총계
+    input:       'FFDDEBF7', // 연한 파란 - 입력값
+    inputTotal:  'FFFFFF00', // 노란색 - 입력총계
+    stat:        'FF92D050', // 초록색 - Max/순위/백분위
+    linkcol:     'FFDCE6F1'  // 링크열 (기존 색 유지)
+  };
+  const thinBorder = { style:'thin', color:{argb:'FF000000'} };
+  const thickBorder = { style:'thick', color:{argb:'FF000000'} };
+  const thinBox  = { top:thinBorder, left:thinBorder, bottom:thinBorder, right:thinBorder };
+
+  function writeSheet(name, data, timeColIdx=0) {
+    const ws = wb.addWorksheet(name);
+    const linkColNum = data.headers.length + 1; // 맨 오른쪽 추가 열
+    const targetRowNum = data.highlightIdx + 2; // 과금대상 행의 실제 시트 행 번호
+    const categories = data.categories.concat(['linkcol']);
+
+    const extendedHeaders = data.headers.concat(['과금 Data 바로가기']);
+    ws.addRow(extendedHeaders);
+    const headerRow = ws.getRow(1);
+    headerRow.height = 33;
+    headerRow.font = { bold: true };
+    headerRow.eachCell((c, colNumber) => {
+      c.fill = { type:'pattern', pattern:'solid', fgColor:{argb: CATEGORY_COLORS[categories[colNumber-1]] || 'FFDCE6F1'} };
+      c.alignment = { wrapText: true, vertical: 'middle', horizontal: 'center' };
+    });
+    // 헤더의 마지막 열을 클릭하면 과금대상 행(A열)로 이동하는 내부 링크로 변경
+    const linkHeaderCell = ws.getCell(1, linkColNum);
+    linkHeaderCell.value = { text: '과금 Data 바로가기', hyperlink: `#'${name}'!A${targetRowNum}` };
+    linkHeaderCell.font = { bold:true, underline:true, color:{argb:'FF0563C1'} };
+
+    data.rows.forEach((r, i) => {
+      const extRow = r.concat([ i === data.highlightIdx ? '← 과금대상 Data' : null ]);
+      ws.addRow(extRow);
+    });
+
+    // 열 너비 (전체 21.25 통일, 새 링크 열 포함)
+    ws.columns.forEach(col => { col.width = 21.25; });
+    // 시간 열 포맷
+    ws.getColumn(timeColIdx+1).numFmt = 'yyyy-mm-dd hh:mm';
+    // 숫자 열 포맷 (링크 열 제외)
+    for (let c=2; c<=data.headers.length; c++) {
+      ws.getColumn(c).numFmt = '#,##0';
+    }
+    // 백분위 열 % 포맷 (링크 열 바로 앞)
+    ws.getColumn(data.headers.length).numFmt = '0.00%';
+
+    // 전체 테두리 적용 - 기본은 얇은 테두리
+    const lastRowNum = data.rows.length + 1; // 헤더 포함 마지막 행 번호
+    const totalColNumbers = new Set();
+    categories.forEach((cat, idx) => { if (cat === 'outputTotal' || cat === 'inputTotal') totalColNumbers.add(idx+1); });
+    ws.eachRow({ includeEmpty: true }, (row, rowNumber) => {
+      row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+        if (totalColNumbers.has(colNumber)) {
+          // 총계열은 셀마다가 아니라 열 전체를 감싸는 굵은 테두리 (좌우는 항상 굵게, 위/아래는 열의 맨 위/맨 아래에서만 굵게)
+          cell.border = {
+            left: thickBorder,
+            right: thickBorder,
+            top: rowNumber === 1 ? thickBorder : thinBorder,
+            bottom: rowNumber === lastRowNum ? thickBorder : thinBorder
+          };
+        } else {
+          cell.border = thinBox;
+        }
+      });
+    });
+
+    // 95% 컷오프 행(과금대상 행) 하이라이트 - 새 링크 열까지 포함
+    const highlightRow = ws.getRow(targetRowNum);
+    highlightRow.eachCell({includeEmpty:true}, c => {
+      c.fill = { type:'pattern', pattern:'solid', fgColor:{argb:'FFFFFF00'} };
+    });
+    highlightRow.getCell(linkColNum).font = { bold:true, color:{argb:'FFC00000'} };
+    return ws;
+  }
+
+  sheetDefs.forEach(({name, data}) => writeSheet(name, data));
+
+  return wb;
+}
+
+// ---------- IDC트래픽만의 데이터 구성 (Max/순위/백분위 독립 재계산) ----------
+function buildIdcOnly(idcPorts, discountPercent) {
+  const numPorts = idcPorts.length;
+  const timeline = Array.from(idcPorts[0].dataMap.entries())
+    .map(([key,v]) => ({key, serial:v.serial}))
+    .sort((a,b) => a.serial - b.serial);
+
+  const headers = ['시간'];
+  const categories = ['time'];
+  idcPorts.forEach(p => { headers.push(`${p.portId}_출력`); categories.push('output'); });
+  headers.push('출력(bps) 총계'); categories.push('outputTotal');
+  idcPorts.forEach(p => { headers.push(`${p.portId}_입력`); categories.push('input'); });
+  headers.push('입력(bps) 총계'); categories.push('inputTotal');
+  headers.push('Max(출력)'); categories.push('stat');
+  headers.push('순위'); categories.push('stat');
+  headers.push('백분위'); categories.push('stat');
+
+  const maxColIdx = 1 + numPorts + 1 + numPorts + 1;
+
+  const rows = [];
+  timeline.forEach(t => {
+    const row = new Array(headers.length).fill(null);
+    row[0] = t.serial;
+    let outSum = 0, inSum = 0;
+    let idx = 1;
+    idcPorts.forEach(p => {
+      const v = p.dataMap.get(t.key);
+      const val = v ? Number(v.out)||0 : 0;
+      row[idx++] = val; outSum += val;
+    });
+    row[idx++] = outSum;
+    idcPorts.forEach(p => {
+      const v = p.dataMap.get(t.key);
+      const val = v ? Number(v.in)||0 : 0;
+      row[idx++] = val; inSum += val;
+    });
+    row[idx++] = inSum;
+    row[idx++] = Math.max(outSum, inSum);
+    rows.push(row);
+  });
+
+  const highlightIdx = rankAndPercentile(rows, maxColIdx, discountPercent);
+  return { headers, categories, rows, numPorts, maxColIdx, highlightIdx, totalTimeSlots: timeline.length };
+}
+
+// ---------- 국내 비즈넷만의 데이터 구성 (Max/순위/백분위 독립 재계산) ----------
+function buildBiznetDomesticOnly(dom, discountPercent) {
+  const numDom = dom.outputHeaders.length;
+  const timeline = Array.from(dom.dataMap.entries())
+    .map(([key,v]) => ({key, serial:v.serial}))
+    .sort((a,b) => a.serial - b.serial);
+
+  const headers = ['시간'];
+  const categories = ['time'];
+  dom.outputHeaders.forEach(h => { headers.push(`${h}_출력`); categories.push('output'); });
+  headers.push('출력(bps) 총계'); categories.push('outputTotal');
+  dom.inputHeaders.forEach(h => { headers.push(`${h}_입력`); categories.push('input'); });
+  headers.push('입력(bps) 총계'); categories.push('inputTotal');
+  headers.push('Max(출력)'); categories.push('stat');
+  headers.push('순위'); categories.push('stat');
+  headers.push('백분위'); categories.push('stat');
+
+  const maxColIdx = 1 + numDom + 1 + numDom + 1;
+
+  const rows = [];
+  timeline.forEach(t => {
+    const row = new Array(headers.length).fill(null);
+    row[0] = t.serial;
+    const dv = dom.dataMap.get(t.key);
+    let outSum = 0, inSum = 0;
+    let idx = 1;
+    for (let j=0;j<numDom;j++) { const val = dv ? (Number(dv.outArr[j])||0) : 0; row[idx++]=val; outSum+=val; }
+    row[idx++] = outSum;
+    for (let j=0;j<numDom;j++) { const val = dv ? (Number(dv.inArr[j])||0) : 0; row[idx++]=val; inSum+=val; }
+    row[idx++] = inSum;
+    row[idx++] = Math.max(outSum, inSum);
+    rows.push(row);
+  });
+
+  const highlightIdx = rankAndPercentile(rows, maxColIdx, discountPercent);
+  return { headers, categories, rows, numDom, maxColIdx, highlightIdx, totalTimeSlots: timeline.length };
+}
+
+// ---------- 과금 기준 커브 SVG ----------
+function buildCurveSVG(rows, maxColIdx, highlightIdx) {
+  const W = 460, H = 190, padL = 30, padR = 14, padT = 18, padB = 26;
+  const plotW = W - padL - padR, plotH = H - padT - padB;
+  const N = rows.length;
+  const maxSamples = 160;
+  const step = Math.max(1, Math.floor(N / maxSamples));
+  const pts = [];
+  for (let i=0;i<N;i+=step) pts.push(Number(rows[i][maxColIdx])||0);
+  if (pts[pts.length-1] !== (Number(rows[N-1][maxColIdx])||0)) pts.push(Number(rows[N-1][maxColIdx])||0);
+  const maxVal = pts[0] || 1;
+  const minVal = pts[pts.length-1] || 0;
+  const range = (maxVal - minVal) || 1;
+
+  const xAt = (i) => padL + (i/(pts.length-1)) * plotW;
+  const yAt = (v) => padT + (1 - (v-minVal)/range) * plotH;
+
+  let path = `M ${xAt(0)} ${yAt(pts[0])}`;
+  for (let i=1;i<pts.length;i++) path += ` L ${xAt(i)} ${yAt(pts[i])}`;
+  const areaPath = path + ` L ${xAt(pts.length-1)} ${padT+plotH} L ${xAt(0)} ${padT+plotH} Z`;
+
+  const cutoffFrac = highlightIdx / (N-1);
+  const cutoffX = padL + cutoffFrac*plotW;
+  const cutoffIdxInPts = Math.min(pts.length-1, Math.round(cutoffFrac*(pts.length-1)));
+  const cutoffY = yAt(pts[cutoffIdxInPts]);
+
+  return `
+  <svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" xmlns="http://www.w3.org/2000/svg">
+    <defs>
+      <linearGradient id="grad${highlightIdx}" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#f7d7c4" stop-opacity="0.9"/>
+        <stop offset="100%" stop-color="#f7d7c4" stop-opacity="0.05"/>
+      </linearGradient>
+    </defs>
+    <path d="${areaPath}" fill="url(#grad${highlightIdx})"/>
+    <path d="${path}" fill="none" stroke="#03887a" stroke-width="2"/>
+    <line x1="${cutoffX}" y1="${padT}" x2="${cutoffX}" y2="${padT+plotH}" stroke="#d9534f" stroke-width="1.3" stroke-dasharray="4,3"/>
+    <circle cx="${cutoffX}" cy="${cutoffY}" r="4" fill="#d9534f"/>
+    <text x="${cutoffX}" y="${padT-6}" font-size="10.5" fill="#d9534f" text-anchor="middle" font-weight="600">과금 기준점</text>
+    <text x="${padL}" y="${H-8}" font-size="10.5" fill="#888">트래픽 1위</text>
+    <text x="${W-padR}" y="${H-8}" font-size="10.5" fill="#888" text-anchor="end">트래픽 최하위</text>
+  </svg>`;
+}
+
+function renderResultBox(title, data, discountPercent) {
+  const cutoffRow = data.rows[data.highlightIdx];
+  const cutoffVal = Number(cutoffRow[data.maxColIdx]) || 0;
+  const cutoffGbps = (cutoffVal / 1e9).toFixed(3);
+  const rankNo = data.highlightIdx + 1;
+  const svg = buildCurveSVG(data.rows, data.maxColIdx, data.highlightIdx);
+  return `
+  <div class="result-box">
+    <h3>${title}</h3>
+    <div class="result-nums">
+      <div class="item"><div class="lbl">과금대상 트래픽 No</div><div class="val">${rankNo}</div></div>
+      <div class="item"><div class="lbl">사용량(Gbps)</div><div class="val">${cutoffGbps}</div></div>
+    </div>
+    ${svg}
+    <div class="curve-caption">전체 ${data.rows.length}개 시점을 트래픽 합계 내림차순으로 나열했을 때, 상위 ${discountPercent}% 지점을 제외한 첫 시점(No.${rankNo})이 과금 기준 트래픽이 됩니다.</div>
+  </div>`;
+}
+
+// ---------- 검증 패널 ----------
+function renderVerification(items) {
+  document.getElementById('verifyCard').style.display = 'block';
+  const tbody = document.querySelector('#verifyTable tbody');
+  tbody.innerHTML = '<tr><th>검증 항목</th><th>결과</th><th>세부내용</th></tr>';
+  items.forEach(it => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${it.label}</td><td class="${it.pass?'ok':'fail'}">${it.pass?'✅':'❌'}</td><td>${it.detail}</td>`;
+    tbody.appendChild(tr);
+  });
+}
+
+function runVerification(domData, intlData, idcPorts, dom, intl, targetYear, targetMonth) {
+  const items = [];
+  const uniquePortIds = new Set(idcPorts.map(p=>p.portId));
+  items.push({ label: 'IDC 포트 수 감지', pass: idcPorts.length > 0, detail: `${idcPorts.length}개 포트 (파일 ${new Set(idcPorts.map(p=>p.fileLabel)).size}개 합산): ${idcPorts.map(p=>p.portId).join(', ')}` });
+  items.push({ label: 'IDC 포트ID 중복 여부', pass: uniquePortIds.size === idcPorts.length, detail: uniquePortIds.size === idcPorts.length ? '중복 없음' : `⚠ 중복된 포트ID ${idcPorts.length - uniquePortIds.size}건 발견 — 열 헤더가 겹칠 수 있음` });
+  items.push({ label: '국내비즈넷 입력/출력 회선 수 일치', pass: dom.inputHeaders.length === dom.outputHeaders.length, detail: `입력 ${dom.inputHeaders.length}개 / 출력 ${dom.outputHeaders.length}개` });
+  items.push({ label: '국제비즈넷 입력/출력 회선 수 일치', pass: intl.inputHeaders.length === intl.outputHeaders.length, detail: `입력 ${intl.inputHeaders.length}개 / 출력 ${intl.outputHeaders.length}개` });
+  items.push({ label: '국내 시트 - IDC/비즈넷 시간대 매칭 누락 개수', pass: domData.missingCount === 0, detail: domData.missingCount === 0 ? '누락 없음' : `${domData.missingCount}건 시간대 불일치 (0으로 처리됨)` });
+  items.push({ label: '국내 시트 - 총 시간대(행) 수', pass: domData.totalTimeSlots > 0, detail: `${domData.totalTimeSlots}행 (시간대)` });
+  items.push({ label: '국제 시트 - 총 시간대(행) 수', pass: intlData.totalTimeSlots > 0, detail: `${intlData.totalTimeSlots}행 (시간대)` });
+
+  function dateRangeOf(rows) {
+    if (rows.length === 0) return '데이터 없음';
+    const serials = rows.map(r => r[0]);
+    const minP = decodeSerial(Math.min(...serials)), maxP = decodeSerial(Math.max(...serials));
+    return `${minP.y}-${String(minP.m).padStart(2,'0')}-${String(minP.d).padStart(2,'0')} ~ ${maxP.y}-${String(maxP.m).padStart(2,'0')}-${String(maxP.d).padStart(2,'0')}`;
+  }
+  items.push({ label: '국내 시트 - 사용월 필터 적용 후 날짜 범위', pass: true, detail: dateRangeOf(domData.rows) + ` (선택 사용월: ${targetYear}년 ${targetMonth}월 외 데이터는 제외됨)` });
+  items.push({ label: '국제 시트 - 사용월 필터 적용 후 날짜 범위', pass: true, detail: dateRangeOf(intlData.rows) + ` (선택 사용월: ${targetYear}년 ${targetMonth}월 외 데이터는 제외됨)` });
+
+  let sortedOkDom = true;
+  for (let i=1;i<domData.rows.length;i++) { if (domData.rows[i][domData.maxColIdx] > domData.rows[i-1][domData.maxColIdx]) { sortedOkDom = false; break; } }
+  items.push({ label: '국내 시트 - Max(출력) 내림차순 정렬 확인', pass: sortedOkDom, detail: sortedOkDom ? '정상 정렬' : '정렬 오류 발견' });
+
+  let sortedOkIntl = true;
+  for (let i=1;i<intlData.rows.length;i++) { if (intlData.rows[i][intlData.maxColIdx] > intlData.rows[i-1][intlData.maxColIdx]) { sortedOkIntl = false; break; } }
+  items.push({ label: '국제 시트 - Max(출력) 내림차순 정렬 확인', pass: sortedOkIntl, detail: sortedOkIntl ? '정상 정렬' : '정렬 오류 발견' });
+
+  items.push({ label: '95% 컷오프 행 위치 (국내)', pass: true, detail: `${domData.highlightIdx+2}행 하이라이트 (전체 ${domData.rows.length}행 중)` });
+  items.push({ label: '95% 컷오프 행 위치 (국제)', pass: true, detail: `${intlData.highlightIdx+2}행 하이라이트 (전체 ${intlData.rows.length}행 중)` });
+
+  renderVerification(items);
+  return items.every(i => i.pass);
+}
+
+// ---------- 메인 처리 ----------
+let finalWorkbooks = { combined:null, idc:null, biznet:null };
+
+document.getElementById('processBtn').addEventListener('click', async () => {
+  logEl.textContent = '';
+  ['downloadBtn1','downloadBtn2','downloadBtn3'].forEach(id => document.getElementById(id).disabled = true);
+  document.getElementById('resultCard').style.display = 'none';
+  document.getElementById('verifyCard').style.display = 'none';
+  try {
+    const idcFiles = Array.from(document.getElementById('idcFiles').files);
+    const domFile = document.getElementById('domFile').files[0];
+    const intlFile = document.getElementById('intlFile').files[0];
+    if (idcFiles.length === 0 || !domFile || !intlFile) { alert('IDC트래픽 파일(1개 이상), 국내_비즈넷, 국제_비즈넷 파일을 모두 업로드해주세요.'); return; }
+
+    const discountPercent = +discountSlider.value;
+    const targetYear = +document.getElementById('usageYear').value;
+    const targetMonth = +monthSel.value;
+    log(`설정: 사용월 ${targetYear}년 ${targetMonth}월, Peak 할인율 ${discountPercent}%`);
+
+    log(`파일 읽는 중... (IDC트래픽 ${idcFiles.length}개 파일 포함)`);
+    const [idcWbs, domWb, intlWb] = await Promise.all([
+      Promise.all(idcFiles.map(f => readFileAsWorkbook(f))),
+      readFileAsWorkbook(domFile), readFileAsWorkbook(intlFile)
+    ]);
+
+    log('IDC트래픽 파싱 중...');
+    let idcPorts = [];
+    idcWbs.forEach((wb, i) => {
+      const portsInFile = parseIDC(wb, idcFiles[i].name, targetYear, targetMonth);
+      idcPorts = idcPorts.concat(portsInFile);
+    });
+    if (idcPorts.length === 0) throw new Error('IDC트래픽에서 유효한 포트를 찾지 못했습니다.');
+    log(`IDC트래픽 총 ${idcPorts.length}개 포트 확보 (파일 ${idcFiles.length}개 합산)`);
+
+    log('국내_비즈넷 파싱 중... (입력 B~O, 출력 Q~AD)');
+    const dom = parseBiznet(domWb, 'B','O','Q','AD','국내_비즈넷', targetYear, targetMonth);
+
+    log('국제_비즈넷 파싱 중... (입력 B~G, 출력 I~N)');
+    const intl = parseBiznet(intlWb, 'B','G','I','N','국제_비즈넷', targetYear, targetMonth);
+
+    log('① 통합인터넷(국내+국제) 계산 중...');
+    const domData = buildDomestic(idcPorts, dom, discountPercent);
+    const intlData = buildIntl(intl, discountPercent);
+
+    log('② IDC만의 데이터 계산 중... (Max/순위/백분위 독립 재계산)');
+    const idcOnlyData = buildIdcOnly(idcPorts, discountPercent);
+
+    log('③ 비즈넷만의 데이터 계산 중... (국내비즈넷 Max/순위/백분위 독립 재계산, 국제는 원래 비즈넷 전용)');
+    const biznetDomOnlyData = buildBiznetDomesticOnly(dom, discountPercent);
+
+    log('검증 진행 중...');
+    const allPass = runVerification(domData, intlData, idcPorts, dom, intl, targetYear, targetMonth);
+    log(allPass ? '모든 검증 통과 ✅' : '일부 검증 실패 — 검증 표를 확인하세요 ❌');
+
+    document.getElementById('resultGrid').innerHTML =
+      renderResultBox('① 통합인터넷(국내)', domData, discountPercent) +
+      renderResultBox('① 통합인터넷(국제)', intlData, discountPercent) +
+      renderResultBox('② IDC트래픽만(국내)', idcOnlyData, discountPercent) +
+      renderResultBox('③ 비즈넷만(국내)', biznetDomOnlyData, discountPercent);
+    document.getElementById('resultCard').style.display = 'block';
+
+    log('Excel 워크북 3종 생성 중...');
+    finalWorkbooks.combined = await buildWorkbookFromSheets([
+      { name:'통합인터넷(국내)', data: domData },
+      { name:'통합인터넷(국제)', data: intlData }
+    ]);
+    finalWorkbooks.idc = await buildWorkbookFromSheets([
+      { name:'IDC트래픽(국내)', data: idcOnlyData }
+    ]);
+    finalWorkbooks.biznet = await buildWorkbookFromSheets([
+      { name:'비즈넷(국내)', data: biznetDomOnlyData },
+      { name:'비즈넷(국제)', data: intlData }
+    ]);
+
+    log('완료! 원하는 다운로드 버튼을 눌러주세요.');
+    ['downloadBtn1','downloadBtn2','downloadBtn3'].forEach(id => document.getElementById(id).disabled = false);
+  } catch (err) {
+    log('오류 발생: ' + err.message);
+    console.error(err);
+    alert('오류: ' + err.message);
+  }
+});
+
+async function downloadWorkbook(wb, filenamePrefix) {
+  if (!wb) return;
+  const buf = await wb.xlsx.writeBuffer();
+  const blob = new Blob([buf], { type: 'application/octet-stream' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  const y = document.getElementById('usageYear').value;
+  const m = String(monthSel.value).padStart(2,'0');
+  a.href = url;
+  a.download = `${filenamePrefix}_${y}${m}.xlsx`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+document.getElementById('downloadBtn1').addEventListener('click', () => downloadWorkbook(finalWorkbooks.combined, '네이버_인터넷_통합'));
+document.getElementById('downloadBtn2').addEventListener('click', () => downloadWorkbook(finalWorkbooks.idc, '네이버_IDC트래픽'));
+document.getElementById('downloadBtn3').addEventListener('click', () => downloadWorkbook(finalWorkbooks.biznet, '네이버_비즈넷'));
+</script>
+</body>
+</html>
